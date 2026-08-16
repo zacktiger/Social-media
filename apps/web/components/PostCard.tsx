@@ -80,18 +80,25 @@ export function PostCard({ post: item }: { post: Post }) {
   });
 
   const toggleLike = useMutation({
-    mutationFn: () =>
-      liked
-        ? del<{ likeCount: number }>(`/api/posts/${item.id}/like`)
-        : post<{ likeCount: number }>(`/api/posts/${item.id}/like`),
+    /**
+     * The intent is the mutation's argument, not something read back off
+     * state. `onMutate` flips `liked` optimistically and React re-renders
+     * before this async function runs, so reading `liked` here would see the
+     * flipped value and send exactly the opposite request - a like arriving
+     * as an unlike. The API treats a repeat as a no-op, so it fails silently.
+     */
+    mutationFn: (next: boolean) =>
+      next
+        ? post<{ likeCount: number }>(`/api/posts/${item.id}/like`)
+        : del<{ likeCount: number }>(`/api/posts/${item.id}/like`),
     // Optimistic: the counter flips immediately, the request confirms it.
-    onMutate: () => {
+    onMutate: (next) => {
       const previous = { liked, likeCount };
-      setLiked(!liked);
-      setLikeCount(likeCount + (liked ? -1 : 1));
+      setLiked(next);
+      setLikeCount(likeCount + (next ? 1 : -1));
       return previous;
     },
-    onError: (_error, _vars, previous) => {
+    onError: (_error, _next, previous) => {
       if (previous) {
         setLiked(previous.liked);
         setLikeCount(previous.likeCount);
@@ -148,7 +155,7 @@ export function PostCard({ post: item }: { post: Post }) {
 
           <footer className="mt-3 flex items-center gap-1 text-sm text-muted">
             <button
-              onClick={() => toggleLike.mutate()}
+              onClick={() => toggleLike.mutate(!liked)}
               aria-pressed={liked}
               aria-label={liked ? `Unlike, ${likeCount} likes` : `Like, ${likeCount} likes`}
               className={`-ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors ${
