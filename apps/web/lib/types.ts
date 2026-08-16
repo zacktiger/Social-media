@@ -38,10 +38,13 @@ export type Comment = {
   author: User;
 };
 
+/** The three ways `GET /api/feed` can build the same page. */
+export type FeedMode = 'hybrid' | 'ranked-live' | 'naive';
+
 export type FeedResponse = {
   items: Post[];
   nextCursor: string | null;
-  mode: 'hybrid' | 'naive';
+  mode: FeedMode;
   tookMs: number;
   meta?: { fromCache: number; fromCelebrities: number; rebuilt: boolean };
 };
@@ -53,4 +56,24 @@ export function timeAgo(iso: string): string {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)}d`;
   return new Date(iso).toLocaleDateString();
+}
+
+/** The exact timestamp, for the tooltip behind every relative one. */
+export function fullDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
+/** "Joined March 2026" on profiles. */
+export function joinedOn(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+/** 1200 -> "1.2k". Follower counts on this dataset run into the thousands. */
+export function compactCount(value: number): string {
+  if (value < 1000) return String(value);
+  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`;
+  return `${(value / 1_000_000).toFixed(1)}M`;
 }

@@ -322,8 +322,10 @@ apps/api
   tests/                    core.mjs, features.mjs
 
 apps/web
+  app/globals.css           design tokens plus the card, button and input shapes
   app/                      feed, login, register, search, /u/[username] (SSR), /p/[id]
   components/               Composer, FeedList, PostCard, NotificationBell, FollowButton, Nav
+  components/               Avatar, Skeleton, PasswordInput, icons (inline SVG, no icon library)
   lib/api.ts                fetch wrapper, token refresh, retry
   lib/socket.ts             one shared socket, room subscriptions
 

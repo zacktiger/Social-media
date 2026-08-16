@@ -6,7 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, del, post } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { usePostRoom, useSocketEvent } from '@/lib/socket';
-import { timeAgo, type Comment, type Media, type Post } from '@/lib/types';
+import { fullDate, timeAgo, type Comment, type Media, type Post } from '@/lib/types';
+import { Avatar, AvatarLink } from './Avatar';
+import { CommentIcon, HeartIcon, Spinner, TrashIcon } from './icons';
 
 /**
  * Renders the `feed` rendition (600px) and links to `original`. The browser
@@ -15,20 +17,44 @@ import { timeAgo, type Comment, type Media, type Post } from '@/lib/types';
 function PostMedia({ media }: { media: Media[] | null }) {
   if (!media || media.length === 0) return null;
 
+  const single = media.length === 1;
+
   return (
-    <div className={`mt-3 grid gap-2 ${media.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+    <div className={`mt-3 grid gap-1.5 ${single ? 'grid-cols-1' : 'grid-cols-2'}`}>
       {media.map((image) => (
-        <a key={image.original} href={image.original} target="_blank" rel="noreferrer">
+        <a
+          key={image.original}
+          href={image.original}
+          target="_blank"
+          rel="noreferrer"
+          className="group/media relative overflow-hidden rounded-xl border border-edge bg-raised"
+        >
+          {/* Fixed aspect box: the card does not jump when the image decodes,
+              and a mixed portrait/landscape grid still lines up. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={image.feed}
             alt=""
             loading="lazy"
-            className="w-full rounded-lg border border-edge object-cover"
+            className={`w-full object-cover transition-transform duration-300 group-hover/media:scale-[1.02] ${
+              single ? 'max-h-[28rem]' : 'aspect-square'
+            }`}
           />
         </a>
       ))}
     </div>
+  );
+}
+
+/** Shown on posts by accounts past the fan-out threshold. */
+function PullPathBadge({ className = '' }: { className?: string }) {
+  return (
+    <span
+      title="Over the fan-out threshold: this post is pulled at read time, never pushed"
+      className={`rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-px text-[10px] font-medium uppercase tracking-wide text-amber-400 ${className}`}
+    >
+      pull path
+    </span>
   );
 }
 
@@ -39,6 +65,7 @@ export function PostCard({ post: item }: { post: Post }) {
   const [likeCount, setLikeCount] = useState(item.likeCount);
   const [commentCount, setCommentCount] = useState(item.commentCount);
   const [showComments, setShowComments] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Join this post's room while the card is mounted, then take engagement
   // counts from the server instead of guessing at them.
@@ -75,63 +102,118 @@ export function PostCard({ post: item }: { post: Post }) {
 
   const remove = useMutation({
     mutationFn: () => del(`/api/posts/${item.id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['feed'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      // A post deleted from a profile page has to leave that timeline too, not
+      // just the feed the card usually lives in.
+      queryClient.invalidateQueries({ queryKey: ['timeline'] });
+    },
   });
 
+  const isAuthor = user?.id === item.author.id;
+
   return (
-    <article className="rounded-xl border border-edge bg-panel p-4">
-      <header className="flex items-baseline gap-2 text-sm">
-        <Link href={`/u/${item.author.username}`} className="font-semibold hover:underline">
-          {item.author.displayName}
-        </Link>
-        <span className="text-muted">@{item.author.username}</span>
-        {item.author.isCelebrity && (
-          <span
-            title="Over the fan-out threshold: this post is pulled at read time, never pushed"
-            className="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-400"
-          >
-            pull path
-          </span>
-        )}
-        <span className="ml-auto text-xs text-muted">{timeAgo(item.createdAt)}</span>
-      </header>
+    <article className="card animate-fade-in p-4 transition-colors hover:border-edge-strong">
+      <div className="flex gap-3">
+        <AvatarLink user={item.author} />
 
-      {item.content && (
-        <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed">{item.content}</p>
-      )}
+        <div className="min-w-0 flex-1">
+          <header className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <Link
+              href={`/u/${item.author.username}`}
+              className="truncate font-semibold hover:underline"
+            >
+              {item.author.displayName}
+            </Link>
+            <span className="truncate text-muted">@{item.author.username}</span>
+            {item.author.isCelebrity && <PullPathBadge />}
 
-      <PostMedia media={item.mediaUrls} />
+            <Link
+              href={`/p/${item.id}`}
+              className="ml-auto shrink-0 text-xs text-faint transition-colors hover:text-muted"
+            >
+              <time dateTime={item.createdAt} title={fullDate(item.createdAt)}>
+                {timeAgo(item.createdAt)}
+              </time>
+            </Link>
+          </header>
 
-      <footer className="mt-3 flex items-center gap-4 text-sm text-muted">
-        <button
-          onClick={() => toggleLike.mutate()}
-          className={`transition-colors ${liked ? 'text-rose-400' : 'hover:text-white'}`}
-        >
-          {liked ? '♥' : '♡'} {likeCount}
-        </button>
+          {item.content && (
+            <p className="mt-1.5 whitespace-pre-wrap break-words text-[15px] leading-relaxed">
+              {item.content}
+            </p>
+          )}
 
-        <button onClick={() => setShowComments((value) => !value)} className="hover:text-white">
-          ○ {commentCount}
-        </button>
+          <PostMedia media={item.mediaUrls} />
 
-        {typeof item.score === 'number' && (
-          <span title="Ranking score at read time" className="text-xs opacity-60">
-            score {item.score.toFixed(3)}
-          </span>
-        )}
+          <footer className="mt-3 flex items-center gap-1 text-sm text-muted">
+            <button
+              onClick={() => toggleLike.mutate()}
+              aria-pressed={liked}
+              aria-label={liked ? `Unlike, ${likeCount} likes` : `Like, ${likeCount} likes`}
+              className={`-ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors ${
+                liked ? 'text-like hover:bg-like/10' : 'hover:bg-like/10 hover:text-like'
+              }`}
+            >
+              <HeartIcon className={`h-[18px] w-[18px] ${liked ? 'animate-pop' : ''}`} filled={liked} />
+              <span className="tabular text-[13px]">{likeCount}</span>
+            </button>
 
-        {user?.id === item.author.id && (
-          <button
-            onClick={() => remove.mutate()}
-            className="ml-auto text-xs hover:text-red-400"
-            disabled={remove.isPending}
-          >
-            Delete
-          </button>
-        )}
-      </footer>
+            <button
+              onClick={() => setShowComments((value) => !value)}
+              aria-expanded={showComments}
+              aria-label={`${showComments ? 'Hide' : 'Show'} comments, ${commentCount} total`}
+              className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent/10 hover:text-accent ${
+                showComments ? 'text-accent' : ''
+              }`}
+            >
+              <CommentIcon className="h-[18px] w-[18px]" />
+              <span className="tabular text-[13px]">{commentCount}</span>
+            </button>
 
-      {showComments && <Comments postId={item.id} />}
+            {typeof item.score === 'number' && (
+              <span
+                title="Ranking score this post was served at: (1 + likes + 2·comments) / (age_hours + 2)^1.8"
+                className="chip ml-1 hidden text-faint sm:inline-flex"
+              >
+                score <span className="tabular">{item.score.toFixed(3)}</span>
+              </span>
+            )}
+
+            {isAuthor &&
+              // Two-step rather than a window.confirm(): no modal, and the
+              // undo is just moving the mouse away.
+              (confirmDelete ? (
+                <span className="ml-auto flex items-center gap-1 text-xs">
+                  <button
+                    onClick={() => remove.mutate()}
+                    disabled={remove.isPending}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-rose-400 hover:bg-rose-500/10"
+                  >
+                    {remove.isPending ? <Spinner className="h-3 w-3" /> : null}
+                    Delete
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="rounded-md px-2 py-1 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  aria-label="Delete post"
+                  className="ml-auto rounded-lg p-1.5 text-faint transition-colors hover:bg-rose-500/10 hover:text-rose-400"
+                >
+                  <TrashIcon className="h-[18px] w-[18px]" />
+                </button>
+              ))}
+          </footer>
+
+          {showComments && <Comments postId={item.id} />}
+        </div>
+      </div>
     </article>
   );
 }
@@ -156,41 +238,76 @@ function Comments({ postId }: { postId: string }) {
   });
 
   return (
-    <div className="mt-3 space-y-3 border-t border-edge pt-3">
-      {isLoading && <p className="text-sm text-muted">Loading comments...</p>}
+    <div className="mt-3 space-y-3 border-t border-edge pt-3 animate-fade-in">
+      {isLoading && (
+        <div className="space-y-2" aria-label="Loading comments" role="status">
+          <div className="skeleton h-3 w-32" />
+          <div className="skeleton h-3 w-full" />
+        </div>
+      )}
+
+      {data?.comments.length === 0 && (
+        <p className="text-sm text-faint">No comments yet. Say the first thing.</p>
+      )}
 
       {data?.comments.map((comment) => (
-        <div key={comment.id} className="text-sm">
-          <Link href={`/u/${comment.author.username}`} className="font-medium hover:underline">
-            {comment.author.displayName}
-          </Link>
-          <span className="ml-2 text-xs text-muted">{timeAgo(comment.createdAt)}</span>
-          <p className="mt-0.5 text-muted">{comment.content}</p>
+        <div key={comment.id} className="flex gap-2.5">
+          <AvatarLink user={comment.author} size="xs" />
+          <div className="min-w-0 flex-1 text-sm">
+            <Link
+              href={`/u/${comment.author.username}`}
+              className="font-medium hover:underline"
+            >
+              {comment.author.displayName}
+            </Link>
+            <time
+              dateTime={comment.createdAt}
+              title={fullDate(comment.createdAt)}
+              className="ml-2 text-xs text-faint"
+            >
+              {timeAgo(comment.createdAt)}
+            </time>
+            <p className="mt-0.5 break-words text-muted">{comment.content}</p>
+          </div>
         </div>
       ))}
 
-      {user && (
+      {user ? (
         <form
           onSubmit={(event) => {
             event.preventDefault();
             if (draft.trim()) addComment.mutate();
           }}
-          className="flex gap-2"
+          className="flex items-center gap-2"
         >
+          <Avatar user={user} size="xs" />
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Add a comment"
-            className="flex-1 rounded-md border border-edge bg-ink px-3 py-1.5 text-sm outline-none placeholder:text-muted"
+            aria-label="Add a comment"
+            className="input flex-1 py-1.5"
           />
           <button
             type="submit"
             disabled={!draft.trim() || addComment.isPending}
-            className="rounded-md border border-edge px-3 py-1.5 text-sm disabled:opacity-40"
+            className="btn btn-ghost btn-sm"
           >
+            {addComment.isPending ? <Spinner className="h-3.5 w-3.5" /> : null}
             Reply
           </button>
         </form>
+      ) : (
+        <p className="text-sm text-faint">
+          <Link href="/login" className="text-accent hover:underline">
+            Sign in
+          </Link>{' '}
+          to join the conversation.
+        </p>
+      )}
+
+      {addComment.isError && (
+        <p className="text-sm text-rose-400">{(addComment.error as Error).message}</p>
       )}
     </div>
   );
