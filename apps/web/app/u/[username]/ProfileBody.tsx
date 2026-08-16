@@ -5,6 +5,8 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { FollowButton } from '@/components/FollowButton';
 import { PostCard } from '@/components/PostCard';
+import { PostSkeletonList } from '@/components/Skeleton';
+import { Spinner } from '@/components/icons';
 import type { Post, User } from '@/lib/types';
 
 type ProfileResponse = { user: User; isFollowing: boolean; isSelf: boolean };
@@ -14,7 +16,7 @@ type TimelineResponse = { posts: Post[]; nextCursor: string | null };
 export function ProfileBody({ username }: { username: string }) {
   const { user, loading } = useAuth();
 
-  const { data, fetchNextPage, hasNextPage, isLoading } = useInfiniteQuery({
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
     // These endpoints answer "did *you* like this", so the viewer is part of
     // the cache key and the request waits for the session to be restored.
     queryKey: ['timeline', username, user?.id ?? 'anon'],
@@ -29,13 +31,15 @@ export function ProfileBody({ username }: { username: string }) {
 
   const posts = data?.pages.flatMap((page) => page.posts) ?? [];
 
+  if (isLoading || loading) return <PostSkeletonList count={2} />;
+
   return (
     <section className="space-y-3">
-      {isLoading && <p className="text-sm text-muted">Loading posts...</p>}
-      {!isLoading && posts.length === 0 && (
-        <p className="rounded-xl border border-edge bg-panel p-6 text-center text-sm text-muted">
-          No posts yet.
-        </p>
+      {posts.length === 0 && (
+        <div className="card p-10 text-center">
+          <p className="font-medium">No posts yet</p>
+          <p className="mt-1 text-sm text-muted">When {username} writes something, it lands here.</p>
+        </div>
       )}
 
       {posts.map((item) => (
@@ -45,9 +49,11 @@ export function ProfileBody({ username }: { username: string }) {
       {hasNextPage && (
         <button
           onClick={() => fetchNextPage()}
-          className="w-full rounded-md border border-edge py-2 text-sm text-muted hover:text-white"
+          disabled={isFetchingNextPage}
+          className="btn btn-ghost w-full py-2.5"
         >
-          Load more
+          {isFetchingNextPage && <Spinner />}
+          {isFetchingNextPage ? 'Loading' : 'Load more'}
         </button>
       )}
     </section>
@@ -70,7 +76,7 @@ export function FollowSection({ username }: { username: string }) {
     queryFn: () => api<ProfileResponse>(`/api/users/${username}`),
   });
 
-  if (!data) return null;
+  if (!data) return <div className="skeleton h-9 w-28 rounded-lg" />;
 
   return (
     <FollowButton username={username} initialFollowing={data.isFollowing} isSelf={data.isSelf} />

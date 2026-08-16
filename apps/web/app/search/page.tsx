@@ -5,10 +5,22 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { Avatar } from '@/components/Avatar';
 import { PostCard } from '@/components/PostCard';
-import type { Post, User } from '@/lib/types';
+import { PostSkeletonList, UserRowSkeleton } from '@/components/Skeleton';
+import { SearchIcon } from '@/components/icons';
+import { compactCount, type Post, type User } from '@/lib/types';
 
 type Tab = 'posts' | 'users';
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="card p-10 text-center">
+      <SearchIcon className="mx-auto h-6 w-6 text-faint" />
+      <p className="mt-3 text-sm text-muted">{children}</p>
+    </div>
+  );
+}
 
 function SearchResults() {
   const params = useSearchParams();
@@ -28,40 +40,61 @@ function SearchResults() {
   });
 
   if (!query) {
-    return <p className="pt-10 text-center text-sm text-muted">Type something in the search box.</p>;
+    return (
+      <div className="pt-10">
+        <EmptyState>
+          Search posts and people from the box above, or press <kbd className="chip">/</kbd> from
+          anywhere.
+        </EmptyState>
+      </div>
+    );
   }
 
   const active = tab === 'posts' ? posts : users;
 
   return (
-    <div className="space-y-4 pt-4">
-      <div className="flex items-center gap-2 text-sm">
+    <div className="animate-fade-in space-y-4 pt-6">
+      <div>
+        <h1 className="text-lg font-semibold tracking-tight">
+          Results for <span className="text-accent">{query}</span>
+        </h1>
+        <p className="mt-0.5 text-xs text-faint">
+          {/* Which index answered this is the interesting part of the feature. */}
+          {tab === 'posts'
+            ? 'Full-text over a generated tsvector column, ranked by ts_rank'
+            : 'Trigram similarity on username and display name, so typos still match'}
+        </p>
+      </div>
+
+      <div role="tablist" aria-label="Result type" className="flex gap-0.5 rounded-lg bg-ink/60 p-0.5 w-fit">
         {(['posts', 'users'] as Tab[]).map((value) => (
           <button
             key={value}
+            role="tab"
+            aria-selected={tab === value}
             onClick={() => setTab(value)}
-            className={`rounded-md px-3 py-1.5 ${
-              tab === value ? 'bg-accent text-ink' : 'border border-edge text-muted hover:text-white'
+            className={`rounded-[7px] px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              tab === value
+                ? 'bg-accent text-[#06111d]'
+                : 'text-muted hover:bg-white/5 hover:text-white'
             }`}
           >
             {value === 'posts' ? 'Posts' : 'People'}
           </button>
         ))}
-        <span className="ml-auto text-xs text-muted">
-          {tab === 'posts' ? 'full-text, ts_rank' : 'trigram similarity'}
-        </span>
       </div>
 
-      {active.isLoading && <p className="text-sm text-muted">Searching...</p>}
-      {active.error && <p className="text-sm text-red-400">{(active.error as Error).message}</p>}
+      {active.isLoading && (tab === 'posts' ? <PostSkeletonList count={2} /> : <UserRowSkeleton />)}
+
+      {active.error && (
+        <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+          {(active.error as Error).message}
+        </p>
+      )}
 
       {tab === 'posts' && posts.data && (
         <div className="space-y-3">
-          {posts.data.posts.length === 0 && (
-            <p className="rounded-xl border border-edge bg-panel p-6 text-center text-sm text-muted">
-              No posts match “{query}”.
-            </p>
-          )}
+          {posts.data.posts.length === 0 && <EmptyState>No posts match “{query}”.</EmptyState>}
           {posts.data.posts.map((item) => (
             <PostCard key={item.id} post={item} />
           ))}
@@ -70,23 +103,22 @@ function SearchResults() {
 
       {tab === 'users' && users.data && (
         <div className="space-y-2">
-          {users.data.users.length === 0 && (
-            <p className="rounded-xl border border-edge bg-panel p-6 text-center text-sm text-muted">
-              Nobody matches “{query}”.
-            </p>
-          )}
+          {users.data.users.length === 0 && <EmptyState>Nobody matches “{query}”.</EmptyState>}
           {users.data.users.map((person) => (
             <Link
               key={person.id}
               href={`/u/${person.username}`}
-              className="flex items-center justify-between rounded-xl border border-edge bg-panel p-4 hover:border-accent"
+              className="card flex items-center gap-3 p-4 transition-colors hover:border-accent/50"
             >
-              <div>
-                <p className="font-medium">{person.displayName}</p>
-                <p className="text-sm text-muted">@{person.username}</p>
-                {person.bio && <p className="mt-1 text-sm text-muted">{person.bio}</p>}
+              <Avatar user={person} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">{person.displayName}</p>
+                <p className="truncate text-sm text-muted">@{person.username}</p>
+                {person.bio && <p className="mt-1 line-clamp-2 text-sm text-muted">{person.bio}</p>}
               </div>
-              <span className="text-xs text-muted">{person.followerCount} followers</span>
+              <span className="tabular shrink-0 text-xs text-faint">
+                {compactCount(person.followerCount)} followers
+              </span>
             </Link>
           ))}
         </div>
@@ -98,7 +130,7 @@ function SearchResults() {
 export default function SearchPage() {
   // useSearchParams needs a Suspense boundary in the App Router.
   return (
-    <Suspense fallback={<p className="pt-10 text-center text-sm text-muted">Loading...</p>}>
+    <Suspense fallback={<div className="pt-6"><PostSkeletonList count={2} /></div>}>
       <SearchResults />
     </Suspense>
   );
