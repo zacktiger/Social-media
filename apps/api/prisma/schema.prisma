@@ -1,0 +1,153 @@
+// Postgres is the source of truth for everything here.
+// Redis holds only derived data (feed ZSETs), so it can be rebuilt at any time.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // Trigram matching for typo-tolerant username search.
+  extensions = [pg_trgm]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  bio          String?
+  avatarUrl    String?
+
+  // Denormalized counters. Kept in sync inside the same transaction as the
+  // row that changes them, so the fan-out worker can decide push-vs-pull
+  // without a COUNT(*) over the follow table on every post.
+  followerCount  Int @default(0)
+  followingCount Int @default(0)
+  postCount      Int @default(0)
+
+  // Set once followerCount crosses FANOUT_THRESHOLD. Posts by a celebrity are
+  // never pushed to follower feeds; they get merged in at read time instead.
+  isCelebrity Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts         Post[]
+  likes         Like[]
+  comments      Comment[]
+  following     Follow[]       @relation("UserFollowing")
+  followers     Follow[]       @relation("UserFollowers")
+  notifications Notification[] @relation("NotificationRecipient")
+  actions       Notification[] @relation("NotificationActor")
+  refreshTokens RefreshToken[]
+
+  @@index([isCelebrity])
+  // GIN + trigram: lets "kshtij" still match "kshitij". A B-tree index cannot
+  // answer that, and a full-text index indexes whole words, not fragments.
+  @@index([username(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([displayName(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model Follow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  // The fan-out worker pages through "who follows this author" ordered by
+  // followerId, so this index makes that scan index-only.
+  @@index([followingId, followerId])
+  // These two serve the follower / following list endpoints (newest first).
+  @@index([followingId, createdAt(sort: Desc)])
+  @@index([followerId, createdAt(sort: Desc)])
+}
+
+model Post {
+  id       String  @id @default(cuid())
+  authorId String
+  content  String  @db.VarChar(2000)
+  mediaUrls Json?
+
+  likeCount    Int @default(0)
+  commentCount Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  /// Maintained by Postgres as a generated column - see the search migration.
+  /// Prisma has no tsvector type, so it is mapped as Unsupported and only ever
+  /// read through $queryRaw.
+  searchVector Unsupported("tsvector")?
+
+  author   User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes    Like[]
+  comments Comment[]
+
+  // Serves the profile timeline and the celebrity read path
+  // (authorId IN (...) ORDER BY createdAt DESC).
+  @@index([authorId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([searchVector], type: Gin)
+}
+
+model Like {
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([userId, postId])
+  @@index([postId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String   @db.VarChar(1000)
+  createdAt DateTime @default(now())
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt(sort: Desc)])
+}
+
+model Notification {
+  id      String  @id @default(cuid())
+  userId  String // recipient
+  type    String // like | comment | follow
+  actorId String
+  postId  String?
+  read    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user  User @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, read])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
