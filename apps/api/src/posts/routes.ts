@@ -65,8 +65,14 @@ postsRouter.post('/', requireAuth, limitPostCreate, async (req, res) => {
 
   const score = hotScore(post);
 
-  // Your own feed is one ZADD, so it happens inline; everyone else's is a job.
+  // Writing to your own feed is a single Redis call, so it happens right here
+  // and your post shows up the instant you refresh. Delivering it to every
+  // follower could be thousands of writes, so that goes on the queue instead.
   await pushPostToFeeds([authorId], post.id, score);
+
+  // `void` starts the job and moves on without waiting. The post is already
+  // safe in Postgres, so making the author wait for fan-out would slow down
+  // the request for no benefit.
   void enqueue('fanout', {
     postId: post.id,
     authorId,

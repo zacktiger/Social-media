@@ -4,18 +4,33 @@ import { redis } from '../lib/redis.js';
 import { ACTIVE_FEEDS_KEY, FEED_TTL_SECONDS, feedKey } from './keys.js';
 
 /**
- * Pages through "who follows this author" in batches. Ordering by followerId
- * (rather than createdAt) keeps the scan on the [followingId, followerId]
- * index and makes it stable even while new follows arrive mid-fan-out.
+ * Hands back this author's followers a page at a time.
+ *
+ * An account can have a hundred thousand followers, so loading them all into
+ * one array could exhaust memory. The `function*` and `yield` make this a
+ * generator, which means the caller can write:
+ *
+ *     for await (const batch of iterateFollowerIds(authorId)) { ... }
+ *
+ * and get one batch at a time, with the next query only running when the
+ * caller asks for more.
+ *
+ * Each page starts after the last id of the previous page rather than using
+ * OFFSET. OFFSET makes the database count past every row it skips, so it gets
+ * slower the deeper you go, and rows shifting underneath you can cause a
+ * follower to be visited twice or missed entirely.
  */
 export async function* iterateFollowerIds(
   authorId: string,
   batchSize = env.FANOUT_BATCH_SIZE,
 ): AsyncGenerator<string[]> {
+  // Where the previous page ended. Undefined on the first pass.
   let cursor: string | undefined;
 
   for (;;) {
     const rows = await prisma.follow.findMany({
+      // Sorting by followerId (not createdAt) lets this read straight down the
+      // [followingId, followerId] index.
       where: { followingId: authorId, ...(cursor ? { followerId: { gt: cursor } } : {}) },
       orderBy: { followerId: 'asc' },
       take: batchSize,
@@ -24,6 +39,8 @@ export async function* iterateFollowerIds(
 
     if (rows.length === 0) return;
     yield rows.map((row) => row.followerId);
+
+    // A short page means we reached the end, so there is no point asking again.
     if (rows.length < batchSize) return;
     cursor = rows[rows.length - 1]!.followerId;
   }

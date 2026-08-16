@@ -166,6 +166,9 @@ export async function getFeedPage(
   const cursor = decodeCursor(options.cursor);
   const window = limit + CANDIDATE_BUFFER;
 
+  // `void somePromise()` means "start this and don't wait for it". Noting that
+  // the user opened their feed is bookkeeping for the decay job, so the person
+  // reading the page should not pay a round trip for it.
   void markFeedActive(userId);
 
   // 1 + 2. The pushed half (this user's ZSET) and the question of which
@@ -214,21 +217,33 @@ export async function getFeedPage(
   }
 
   if (cachedPosts.length > 0) {
+    // Save the freshly computed scores back to Redis so the next read starts
+    // from better numbers. Not awaited - the page is already correct without
+    // it, and the reader should not wait on a cache tidy-up.
     void updateFeedScores(
       userId,
       cachedPosts.map((post) => ({ postId: post.id, score: candidates.get(post.id)!.score })),
     );
+
+    // Some ids in the ZSET may point at posts that were since deleted, because
+    // deleting a post does not go hunting through everyone's feed. Postgres
+    // just told us which ids still exist, so drop the rest.
     const alive = new Set(cachedPosts.map((p) => p.id));
     const deleted = cached.filter((e) => !alive.has(e.postId)).map((e) => e.postId);
     if (deleted.length > 0) void redis.zrem(feedKey(userId), ...deleted);
   }
 
-  // 4. Merge, apply the cursor, cut the page.
+  // 4. Merge both halves, drop anything already shown, and cut the page.
   const merged = [...candidates.values()]
     .filter(({ post, score }) => {
       if (!cursor) return true;
+      // Keep posts that rank below where the last page stopped. When two posts
+      // tie on score, the post id breaks the tie - and it has to break it the
+      // same way the sort below does, or a post could show up on both pages.
       return score < cursor.score || (score === cursor.score && post.id < cursor.postId);
     })
+    // Highest score first. `b.score - a.score` is 0 for a tie, and in JS 0 is
+    // falsy, so `||` falls through to the id comparison only when scores match.
     .sort((a, b) => b.score - a.score || (a.post.id < b.post.id ? 1 : -1))
     .slice(0, limit);
 

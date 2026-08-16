@@ -43,13 +43,22 @@ function request(path: string, init: RequestInit = {}) {
 }
 
 /**
- * Refresh tokens rotate and are single-use, and the API treats a replayed one
- * as theft and kills every session. So concurrent 401s must share ONE refresh
- * call - firing several would log the user out of their own account.
+ * Holds the refresh request while one is already running.
+ *
+ * A refresh token can only be used once, and the API treats a second use of
+ * the same token as a stolen token and ends every session for that user. So if
+ * three requests all get a 401 at the same time, they must not each start
+ * their own refresh - the first would succeed and the other two would look
+ * like theft, signing the user out of their own account.
+ *
+ * Keeping the promise here means the second and third callers get handed the
+ * same in-progress request instead of starting a new one.
  */
 let inFlightRefresh: Promise<boolean> | null = null;
 
 export function refreshSession(): Promise<boolean> {
+  // `??=` assigns only when the left side is null or undefined, so this starts
+  // a refresh only if one is not already running.
   inFlightRefresh ??= (async () => {
     const res = await fetch(`${API_URL}/api/auth/refresh`, {
       method: 'POST',

@@ -1,22 +1,39 @@
 /**
- * Ranking score, same shape as the Reddit / Hacker News "hot" formula:
+ * How a post is ranked in the feed.
  *
  *     score = (1 + likes + 2*comments) / (age_in_hours + 2)^1.8
  *
- * Why not just sort by createdAt: a timestamp sort can never surface a post
- * that started getting real engagement twenty minutes after it was published.
- * Why not sort by engagement alone: without the decay term, one old viral post
- * sits at the top of every feed forever.
+ * The top of the fraction rewards engagement and the bottom punishes age, so a
+ * post has to keep earning attention to stay near the top. This is the same
+ * idea Reddit and Hacker News use for their "hot" listings.
  *
- * The numerator is linear in likes and comments, which is the property the
- * whole incremental-update scheme rests on: at a fixed age, one extra like is
- * always worth exactly `1 / (age + 2)^1.8` more score. That means a like can
- * be applied to a cached feed entry with a single ZADD ... XX INCR, with no
- * need to recompute the post's score from scratch or re-sort the feed.
+ * Why not just show newest first? A post that only starts getting attention an
+ * hour after it went up would never get its chance to rise.
+ *
+ * Why not just show most liked first? One old popular post would sit at the
+ * top of everybody's feed forever.
+ *
+ * One detail here matters a lot elsewhere. Likes and comments are simply added
+ * together, so for a post of a given age, every extra like is worth the same
+ * fixed amount. A two hour old post with 10 likes scores exactly one like's
+ * worth more than the same post with 9.
+ *
+ * That is what lets a new like be applied to a cached feed entry with a single
+ * Redis command, instead of recalculating the post's score from scratch and
+ * re-sorting the whole feed. See `engagementDelta` at the bottom of this file.
  */
+
+/** How hard age drags a post down. Higher means the feed moves on faster. */
 export const GRAVITY = 1.8;
+
 export const LIKE_WEIGHT = 1;
+/** A comment counts double, since writing one takes more effort than a tap. */
 export const COMMENT_WEIGHT = 2;
+
+/**
+ * Added to the age before dividing. Without it a brand new post would divide
+ * by almost zero and score absurdly high for its first few minutes.
+ */
 const AGE_OFFSET_HOURS = 2;
 
 function decayDivisor(createdAt: Date, now: Date): number {
