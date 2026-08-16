@@ -1,0 +1,24 @@
+{
+  "name": "pulse",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pulse - a real-time social feed with hybrid fan-out feed generation",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:migrate": "npm run db:migrate -w @pulse/api",
+    "db:studio": "npm run db:studio -w @pulse/api",
+    "dev:api": "npm run dev -w @pulse/api",
+    "dev:worker": "npm run worker -w @pulse/api",
+    "dev:web": "npm run dev -w @pulse/web",
+    "build": "npm run build -w @pulse/api && npm run build -w @pulse/web",
+    "typecheck": "npm run typecheck -w @pulse/api && npm run typecheck -w @pulse/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
