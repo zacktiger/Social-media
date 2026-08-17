@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Pulse">
+  <!--
+    The same trace as LogoIcon in components/icons.tsx, on a tile of its own so
+    the mark stays visible against a light or a dark browser tab. Drawn a little
+    heavier than the nav logo because a 2px stroke disappears at 16x16.
+
+    The glow is a second, wider stroke rather than a blur filter - filters are
+    unreliable in favicon rendering, and this costs nothing.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#161d26"/>
+      <stop offset="1" stop-color="#0a0c10"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="32" height="32" rx="7" fill="url(#tile)"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="#4f9dfd" stroke-opacity="0.22"/>
+
+  <!-- Scaled about the centre of the original 24 unit box, so the flat tails
+       keep some margin instead of running into the rounded corners. -->
+  <g transform="translate(16 16) scale(0.88) translate(-12 -12)"
+     fill="none" stroke="#4f9dfd" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 12h4l3-8 4 16 3-8h6" stroke-width="6" stroke-opacity="0.16"/>
+    <path d="M2 12h4l3-8 4 16 3-8h6" stroke-width="3"/>
+  </g>
+</svg>
