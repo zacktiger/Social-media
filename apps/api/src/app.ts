@@ -48,7 +48,7 @@ export function createApp() {
         res.setHeader('x-request-id', id);
         return id;
       },
-      autoLogging: { ignore: (req) => req.url === '/health' },
+      autoLogging: { ignore: (req) => req.url === '/health' || req.url === '/ping' },
       customLogLevel: (_req, res, err) => {
         if (err || res.statusCode >= 500) return 'error';
         if (res.statusCode >= 400) return 'warn';
@@ -73,6 +73,13 @@ export function createApp() {
       }),
     );
   }
+
+  // Liveness only - no database, no Redis, no auth. /health answers "can this
+  // instance serve traffic", this answers "is the process up at all", which is
+  // what you want from a uptime pinger that should not open a pg connection.
+  app.get('/ping', (_req, res) => {
+    res.json({ ok: true, uptime: process.uptime() });
+  });
 
   app.get('/health', async (_req, res) => {
     const [db, cache] = await Promise.allSettled([prisma.$queryRaw`SELECT 1`, redis.ping()]);

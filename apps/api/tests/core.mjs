@@ -49,6 +49,10 @@ console.log('\n== health ==');
   const r = await req('GET', '/health');
   check('health 200', r.status === 200, JSON.stringify(r.json));
   check('postgres + redis up', r.json?.postgres === true && r.json?.redis === true, JSON.stringify(r.json));
+
+  const p = await req('GET', '/ping');
+  check('ping 200', p.status === 200, JSON.stringify(p.json));
+  check('ping reports uptime', p.json?.ok === true && typeof p.json?.uptime === 'number', JSON.stringify(p.json));
 }
 
 console.log('\n== auth ==');
