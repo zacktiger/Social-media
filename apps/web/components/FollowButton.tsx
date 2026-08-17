@@ -21,10 +21,16 @@ export function FollowButton({
   const [hovering, setHovering] = useState(false);
 
   const toggle = useMutation({
-    mutationFn: () =>
-      following ? del(`/api/users/${username}/follow`) : post(`/api/users/${username}/follow`),
-    onMutate: () => setFollowing(!following),
-    onError: () => setFollowing(following),
+    /**
+     * Whether to follow or unfollow is the argument, not a read of `following`.
+     * `onMutate` flips that state and React re-renders before this runs, so
+     * reading it here would send the opposite request - and since follows are
+     * idempotent, the wrong one succeeds quietly instead of erroring.
+     */
+    mutationFn: (next: boolean) =>
+      next ? post(`/api/users/${username}/follow`) : del(`/api/users/${username}/follow`),
+    onMutate: (next) => setFollowing(next),
+    onError: (_error, next) => setFollowing(!next),
   });
 
   if (loading) return <div className="skeleton h-9 w-24 rounded-lg" />;
@@ -44,7 +50,7 @@ export function FollowButton({
 
   return (
     <button
-      onClick={() => toggle.mutate()}
+      onClick={() => toggle.mutate(!following)}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       aria-pressed={following}

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, post } from '@/lib/api';
+import { api, patch, post } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useSocketEvent } from '@/lib/socket';
 import { useDismiss } from '@/lib/use-dismiss';
@@ -86,6 +86,13 @@ export function NotificationBell() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   });
 
+  // Opening a notification is what "reading" it means, so the badge should
+  // drop by one when you follow it rather than waiting for Mark all read.
+  const markOne = useMutation({
+    mutationFn: (id: string) => patch(`/api/notifications/${id}/read`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+
   if (!user) return null;
   const count = unread?.count ?? 0;
 
@@ -153,7 +160,10 @@ export function NotificationBell() {
                 key={item.id}
                 href={item.postId ? `/p/${item.postId}` : `/u/${item.actor.username}`}
                 role="menuitem"
-                onClick={() => setOpen(false)}
+                onClick={() => {
+                  setOpen(false);
+                  if (!item.read) markOne.mutate(item.id);
+                }}
                 className={`flex items-start gap-2.5 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-white/5 ${
                   item.read ? 'text-muted' : ''
                 }`}
