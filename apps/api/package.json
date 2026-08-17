@@ -15,6 +15,7 @@
     "test:core": "node tests/core.mjs",
     "test:features": "node tests/features.mjs",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:load": "tsx prisma/seed-load.ts",
     "db:generate": "prisma generate",

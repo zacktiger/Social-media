@@ -1,0 +1,164 @@
+# Render blueprint for the API, Postgres and Redis.
+#
+# The web app is not here - it deploys to Vercel, which is a better host for
+# Next.js than anything this file could describe. See README "Deployment".
+#
+# Apply with:  Render dashboard -> Blueprints -> New Blueprint Instance
+#
+# Two values are deliberately left blank (`sync: false`) because they are
+# circular: the API needs the web app's URL for CORS, and the web app needs
+# the API's URL. Fill both in the dashboard after the first deploy.
+
+databases:
+  - name: pulse-postgres
+    databaseName: pulse
+    user: pulse
+    plan: free
+    postgresMajorVersion: "16"
+    # pg_trgm is created by the migration, not here - Prisma declares it via
+    # the postgresqlExtensions preview feature.
+
+services:
+  # --- Redis ---------------------------------------------------------------
+  # Named "keyvalue" in current Render blueprints; older accounts may still
+  # need `type: redis`, which is the same product.
+  - type: keyvalue
+    name: pulse-redis
+    plan: free
+    region: oregon
+    # Load bearing. The feed ZSETs are rebuildable on read, but the BullMQ
+    # queue is not - an eviction policy that drops keys under memory pressure
+    # silently discards fan-out jobs, and posts then reach nobody.
+    maxmemoryPolicy: noeviction
+    # Private network only. Nothing outside Render should reach this.
+    ipAllowList: []
+
+  # --- API + inline fan-out worker ----------------------------------------
+  - type: web
+    name: pulse-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    # --include=dev is not optional: Render sets NODE_ENV=production, which
+    # makes npm skip devDependencies, and the build needs tsc and prisma.
+    buildCommand: npm ci --include=dev && npm run db:generate -w @pulse/api && npm run build -w @pulse/api
+    startCommand: npm run start -w @pulse/api
+    healthCheckPath: /health
+
+    # Migrations. preDeployCommand runs after the build and before traffic
+    # switches over, which is where this belongs - but it needs a paid
+    # instance. On free, run migrations from your machine instead:
+    #   DATABASE_URL="<external connection string>" npm run db:deploy -w @pulse/api
+    # preDeployCommand: npm run db:deploy -w @pulse/api
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+      # Not just an optimisation. `sameSite: 'none'` and `secure` on the
+      # refresh cookie are gated on this in auth/tokens.ts, and the web app
+      # is on a different site once it lives on Vercel. Without it, login
+      # appears to work and then every refresh fails.
+      - key: NODE_ENV
+        value: production
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pulse-postgres
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pulse-redis
+          property: connectionString
+
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+
+      # Runs the fan-out worker inside this process, so the whole backend is
+      # one service. Flip to "false" and uncomment the worker below when
+      # fan-out load and request load want to scale separately.
+      - key: INLINE_WORKER
+        value: "true"
+
+      # Your Vercel URL, no trailing slash: https://pulse-web.vercel.app
+      # CORS origin and the refresh cookie's site both come from this.
+      - key: WEB_ORIGIN
+        sync: false
+
+      # This service's own URL: https://pulse-api.onrender.com
+      # Only used to build media URLs while STORAGE=local.
+      - key: PUBLIC_API_URL
+        sync: false
+
+      # --- media ---
+      # Uploads land on the container filesystem, which is wiped on every
+      # deploy and every restart. Fine for a demo; see README for the R2
+      # swap, which is a two-line change.
+      - key: STORAGE
+        value: local
+      - key: UPLOAD_DIR
+        value: uploads
+
+      # --- feed tuning ---
+      # Must match whatever the seed flagged as celebrities, or the API and
+      # the data disagree about who is on the pull path.
+      - key: FANOUT_THRESHOLD
+        value: "5000"
+      - key: FEED_MAX_LENGTH
+        value: "800"
+      - key: FANOUT_BATCH_SIZE
+        value: "500"
+
+      - key: RATE_LIMIT_MULTIPLIER
+        value: "1"
+      - key: LOG_LEVEL
+        value: info
+
+    # Persistent disk for uploads, as an alternative to object storage.
+    # Costs money and pins the service to one instance with downtime on every
+    # deploy, so object storage is the better answer past a demo.
+    # disk:
+    #   name: pulse-uploads
+    #   mountPath: /opt/render/project/src/apps/api/uploads
+    #   sizeGB: 1
+
+  # --- Standalone fan-out worker ------------------------------------------
+  # Set INLINE_WORKER=false above before enabling this, or both processes
+  # consume the same queue. Background workers are not on the free tier.
+  #
+  # - type: worker
+  #   name: pulse-worker
+  #   runtime: node
+  #   plan: starter
+  #   region: oregon
+  #   branch: main
+  #   buildCommand: npm ci --include=dev && npm run db:generate -w @pulse/api && npm run build -w @pulse/api
+  #   startCommand: npm run start:worker -w @pulse/api
+  #   envVars:
+  #     - key: NODE_VERSION
+  #       value: "22"
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: DATABASE_URL
+  #       fromDatabase:
+  #         name: pulse-postgres
+  #         property: connectionString
+  #     - key: REDIS_URL
+  #       fromService:
+  #         type: keyvalue
+  #         name: pulse-redis
+  #         property: connectionString
+  #     - key: JWT_ACCESS_SECRET
+  #       fromService:
+  #         type: web
+  #         name: pulse-api
+  #         envVarKey: JWT_ACCESS_SECRET
+  #     - key: FANOUT_THRESHOLD
+  #       value: "5000"
+  #     - key: FEED_MAX_LENGTH
+  #       value: "800"
+  #     - key: FANOUT_BATCH_SIZE
+  #       value: "500"

@@ -1,0 +1,38 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+out
+
+.git
+.github
+.claude
+.playwright-mcp
+
+# The web app deploys to Vercel and is not in this image. Its manifest is the
+# one exception: npm ci validates every workspace in package-lock.json, so
+# dropping the file entirely makes the install fail on a missing workspace.
+apps/web
+!apps/web/package.json
+
+loadtest
+
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+
+uploads
+**/uploads
+
+*.log
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+.DS_Store
+Thumbs.db
+.idea
+.vscode
