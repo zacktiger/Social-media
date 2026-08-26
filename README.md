@@ -120,32 +120,49 @@ otherwise just be measuring the rate limiter.
 
 ## Architecture
 
+The whole design is one decision repeated: **keep the request path short, and push everything
+derived onto a queue or into a cache that can be thrown away.** Postgres is the only thing that
+has to be right; Redis is allowed to be missing.
+
+```mermaid
+flowchart TB
+    WEB["<b>Next.js 16</b> web app<br/>App Router · TanStack Query<br/>SSR for public profile pages"]
+
+    subgraph API["<b>Express 5 API</b> — Socket.io shares the same HTTP server"]
+        direction LR
+        WRITE["<b>POST /api/posts</b><br/>commit, then return"]
+        MERGE["<b>GET /api/feed</b><br/>merge two halves"]
+        REST["auth · users · search<br/>media · notifications"]
+        SIO["<b>Socket.io</b><br/>per-user and per-post rooms"]
+    end
+
+    RD[("<b>Redis 7</b> — derived only<br/>one ranked ZSET per user<br/>queue · rate limits<br/>pub/sub adapter")]
+    WORKER["<b>Fan-out worker</b> — BullMQ<br/>fanout · engagement<br/>decay · backfill · cleanup"]
+    PG[("<b>PostgreSQL 16</b><br/>source of truth<br/>tsvector + pg_trgm")]
+
+    WEB -->|"REST + WebSocket"| API
+
+    WRITE -.->|"ZADD own feed<br/>enqueue fan-out"| RD
+    WRITE -->|"insert + counters"| PG
+    REST --> PG
+    SIO <-.->|"redis adapter"| RD
+
+    MERGE ==>|"<b>pushed half</b><br/>one ZREVRANGEBYSCORE"| RD
+    MERGE ==>|"<b>pulled half</b><br/>high-follower authors"| PG
+
+    RD -.->|"job"| WORKER
+    WORKER -->|"pipelined ZADD into<br/>every follower feed"| RD
+    WORKER -->|"page the follower graph"| PG
 ```
-                    ┌──────────────┐
-                    │   Next.js    │  SSR for public profile pages,
-                    │   (web)      │  TanStack Query + Socket.io client
-                    └──────┬───────┘
-                           │ REST + WebSocket
-                           ▼
-                    ┌──────────────┐
-                    │  Express API │  Socket.io shares this HTTP server
-                    └──┬────────┬──┘
-                       │        │
-         ┌─────────────┘        └──────────────┐
-         ▼                                      ▼
-  ┌──────────────┐                       ┌──────────────┐
-  │  PostgreSQL  │                       │    Redis     │
-  │  source of   │                       │ feed ZSETs,  │
-  │    truth     │                       │ BullMQ, rate │
-  │              │                       │ limits, pub/ │
-  └──────────────┘                       │ sub adapter  │
-                                         └──────┬───────┘
-                                                │
-                                         ┌──────▼───────┐
-                                         │  Fan-out     │
-                                         │  worker      │
-                                         └──────────────┘
-```
+
+The two edges into `GET /api/feed` are the whole idea. Ordinary accounts are **pushed** — their
+posts are written into every follower's ZSET ahead of time, so a read is one Redis call. Accounts
+past `FANOUT_THRESHOLD` are never fanned out at all; their posts are **pulled** from Postgres at
+read time and merged in. Neither strategy survives alone: pure push dies on the account with a
+million followers, pure pull dies on the reader who follows a thousand people.
+
+> Full reasoning, the alternatives that were rejected, and the project structure are in
+> **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 Redis holds only derived data. Losing it costs latency, never data — any feed rebuilds itself
 from Postgres on the next read.
@@ -304,36 +321,13 @@ per IP. Reads are unthrottled behind auth.
 ## Layout
 
 ```
-apps/api
-  prisma/schema.prisma      users, follows, posts, likes, comments, notifications
-  prisma/seed.ts            demo dataset
-  prisma/seed-load.ts       Zipfian load-testing dataset
-  src/auth/                 tokens (JWT + rotation), middleware, routes
-  src/users/  src/posts/  src/notifications/  src/search/
-  src/media/                upload pipeline + storage adapter
-  src/realtime/             Socket.io server, emit helpers
-  src/middleware/           error handling, rate limiting
-  src/feed/
-    score.ts                the ranking formula and its incremental delta
-    store.ts                every Redis feed operation
-    read.ts                 hybrid read, rebuild, and both baselines
-    processors.ts           fan-out, engagement, backfill, decay jobs
-    queue.ts / worker.ts    BullMQ wiring
-  tests/                    core.mjs, features.mjs
-
-apps/web
-  app/globals.css           design tokens plus the card, button and input shapes
-  app/                      feed, login, register, search, /u/[username] (SSR), /p/[id]
-  components/               Composer, FeedList, PostCard, NotificationBell, FollowButton, Nav
-  components/               Avatar, Skeleton, PasswordInput, icons (inline SVG, no icon library)
-  lib/api.ts                fetch wrapper, token refresh, retry
-  lib/socket.ts             one shared socket, room subscriptions
-
-loadtest/
-  bench.mjs                 three-way feed comparison (no dependencies)
-  fanout-bench.mjs          worker throughput
-  feed.k6.js                k6 version with ramping VUs
+apps/api      Express + Prisma + Redis + BullMQ + Socket.io
+apps/web      Next.js client
+loadtest/     benchmarks; bench.mjs has no dependencies
 ```
+
+Every directory, and why the feed is split the way it is, is in
+**[ARCHITECTURE.md](ARCHITECTURE.md#project-structure)**.
 
 ---
 
