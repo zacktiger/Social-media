@@ -16,18 +16,19 @@ type TimelineResponse = { posts: Post[]; nextCursor: string | null };
 export function ProfileBody({ username }: { username: string }) {
   const { user, loading } = useAuth();
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
-    // These endpoints answer "did *you* like this", so the viewer is part of
-    // the cache key and the request waits for the session to be restored.
-    queryKey: ['timeline', username, user?.id ?? 'anon'],
-    enabled: !loading,
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) =>
-      api<TimelineResponse>(
-        `/api/users/${username}/posts?limit=10${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
-      ),
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error, refetch } =
+    useInfiniteQuery({
+      // These endpoints answer "did *you* like this", so the viewer is part of
+      // the cache key and the request waits for the session to be restored.
+      queryKey: ['timeline', username, user?.id ?? 'anon'],
+      enabled: !loading,
+      initialPageParam: undefined as string | undefined,
+      queryFn: ({ pageParam }) =>
+        api<TimelineResponse>(
+          `/api/users/${username}/posts?limit=10${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
+        ),
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    });
 
   const posts = data?.pages.flatMap((page) => page.posts) ?? [];
 
@@ -35,7 +36,20 @@ export function ProfileBody({ username }: { username: string }) {
 
   return (
     <section className="space-y-3">
-      {posts.length === 0 && (
+      {/* Without this the request failing looks exactly like an account that
+          has never posted, which is a confident answer to a question nobody
+          managed to ask. */}
+      {error && (
+        <div className="card p-10 text-center">
+          <p className="font-medium">Could not load these posts</p>
+          <p className="mt-1 text-sm text-rose-400">{(error as Error).message}</p>
+          <button onClick={() => refetch()} className="btn btn-ghost mt-3">
+            Try again
+          </button>
+        </div>
+      )}
+
+      {!error && posts.length === 0 && (
         <div className="card p-10 text-center">
           <p className="font-medium">No posts yet</p>
           <p className="mt-1 text-sm text-muted">When {username} writes something, it lands here.</p>
@@ -67,7 +81,7 @@ export function ProfileBody({ username }: { username: string }) {
 export function FollowSection({ username }: { username: string }) {
   const { user, loading } = useAuth();
 
-  const { data } = useQuery({
+  const { data, error } = useQuery({
     queryKey: ['profile', username, user?.id ?? 'anon'],
     // Without this the request goes out before the refresh cookie has been
     // exchanged for an access token, and the API answers as an anonymous
@@ -76,6 +90,9 @@ export function FollowSection({ username }: { username: string }) {
     queryFn: () => api<ProfileResponse>(`/api/users/${username}`),
   });
 
+  // No button at all beats a button showing the wrong state - and beats a
+  // skeleton that pulses forever because the request is never coming back.
+  if (error) return null;
   if (!data) return <div className="skeleton h-9 w-28 rounded-lg" />;
 
   return (
