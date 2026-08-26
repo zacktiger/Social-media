@@ -71,6 +71,21 @@ export function joinedOn(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
+/**
+ * The ranking score, at whatever magnitude it actually has.
+ *
+ * Scores decay as `(age_hours + 2)^1.8`, so a post older than about a day is
+ * already below 0.001 and everything past that is smaller still. `toFixed(3)`
+ * rendered the entire feed as "0.000" - the one chip whose whole job is to
+ * show that the feed *is* ranked was reporting zero for every post in it.
+ * Significant digits keep the ordering readable at any age.
+ */
+export function formatScore(value: number): string {
+  // Below 1e-7 this switches to exponent notation, which is the honest
+  // rendering by then - a post that old has no score left to compare.
+  return value.toPrecision(3);
+}
+
 /** 1200 -> "1.2k". Follower counts on this dataset run into the thousands. */
 export function compactCount(value: number): string {
   if (value < 1000) return String(value);

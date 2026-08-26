@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, del, post } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { usePostRoom, useSocketEvent } from '@/lib/socket';
-import { fullDate, timeAgo, type Comment, type Media, type Post } from '@/lib/types';
+import { formatScore, fullDate, timeAgo, type Comment, type Media, type Post } from '@/lib/types';
 import { Avatar, AvatarLink } from './Avatar';
 import { CommentIcon, HeartIcon, Spinner, TrashIcon } from './icons';
 
@@ -183,7 +183,7 @@ export function PostCard({ post: item }: { post: Post }) {
                 title="Ranking score this post was served at: (1 + likes + 2·comments) / (age_hours + 2)^1.8"
                 className="chip ml-1 hidden text-faint sm:inline-flex"
               >
-                score <span className="tabular">{item.score.toFixed(3)}</span>
+                score <span className="tabular">{formatScore(item.score)}</span>
               </span>
             )}
 
