@@ -13,7 +13,7 @@ import { Spinner } from './icons';
  * of exposing them here: switch between them and watch the timing chip while
  * the posts stay recognisably the same.
  */
-const MODES: { value: FeedMode; label: string; hint: string }[] = [
+const MODES: { value: FeedMode; label: string; hint: string; emptyNote?: string }[] = [
   {
     value: 'hybrid',
     label: 'Hybrid',
@@ -23,6 +23,12 @@ const MODES: { value: FeedMode; label: string; hint: string }[] = [
     value: 'ranked-live',
     label: 'Ranked live',
     hint: 'The same ranked page, scored and sorted from scratch on every request',
+    // Scoring every candidate has no index to lean on, so `getRankedNoCacheFeedPage`
+    // caps the scan at 7 days. An empty page here means the window is empty, not
+    // the feed - and saying "follow a few people" to someone with a full feed is
+    // just wrong.
+    emptyNote:
+      'This path only scores the last 7 days, so a feed with nothing recent comes back empty here. Hybrid and Chronological still have posts.',
   },
   {
     value: 'naive',
@@ -62,6 +68,7 @@ export function FeedList() {
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  const activeMode = MODES.find((option) => option.value === mode)!;
   const firstPage = data?.pages[0];
   const posts = data?.pages.flatMap((page) => page.items) ?? [];
 
@@ -139,9 +146,12 @@ export function FeedList() {
 
       {!isLoading && !error && posts.length === 0 && (
         <div className="card p-10 text-center">
-          <p className="font-medium">Your feed is empty</p>
-          <p className="mx-auto mt-1.5 max-w-xs text-sm text-muted">
-            Follow a few people, or write the first post above and watch it fan out.
+          <p className="font-medium">
+            {activeMode.emptyNote ? 'Nothing in this window' : 'Your feed is empty'}
+          </p>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">
+            {activeMode.emptyNote ??
+              'Follow a few people, or write the first post above and watch it fan out.'}
           </p>
         </div>
       )}
