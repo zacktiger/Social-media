@@ -157,7 +157,7 @@ export function PostCard({ post: item }: { post: Post }) {
             <button
               onClick={() => toggleLike.mutate(!liked)}
               aria-pressed={liked}
-              aria-label={liked ? `Unlike, ${likeCount} likes` : `Like, ${likeCount} likes`}
+              aria-label={`${liked ? 'Unlike' : 'Like'}, ${likeCount} ${likeCount === 1 ? 'like' : 'likes'}`}
               className={`-ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors ${
                 liked ? 'text-like hover:bg-like/10' : 'hover:bg-like/10 hover:text-like'
               }`}
